@@ -27,7 +27,7 @@ def run_http_server():
 threading.Thread(target=run_http_server, daemon=True).start()
 
 # Configuration
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8656681867:AAHo0g8ceIv3OBPbExT_k3rZUVlVvviknqw")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8788316380:AAF_GT7XHblOOsoRUK2YLyzR4NydObzBsa0")
 DEFAULT_CHAT_ID = os.environ.get("CHAT_ID", "8135300883")
 CHECK_INTERVAL = 45
 RADIUS_KM = 50.0
