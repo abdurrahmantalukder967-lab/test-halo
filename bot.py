@@ -27,15 +27,16 @@ def run_http_server():
 threading.Thread(target=run_http_server, daemon=True).start()
 
 # Configuration
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8788316380:AAF_GT7XHblOOsoRUK2YLyzR4NydObzBsa0")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8656681867:AAHo0g8ceIv3OBPbExT_k3rZUVlVvviknqw")
 DEFAULT_CHAT_ID = os.environ.get("CHAT_ID", "8135300883")
 CHECK_INTERVAL = 45
 RADIUS_KM = 50.0
 MIN_ALTITUDE_FT = 550
 
 
-# User Locations and States
-USER_LOCATIONS = {DEFAULT_CHAT_ID: [25.0706365, 91.4102260]}
+# User Locations, States and Altitude Filters
+# এখন প্রতিটি ইউজারের জন্য ল্যাট, লন এবং মিনিমাম অল্টিটিউড ডিকশনারি আকারে সেভ হবে
+USER_LOCATIONS = {DEFAULT_CHAT_ID: {"lat": 25.0706365, "lon": 91.4102260, "min_altitude": 0}}
 USER_ALERTED_PLANES = {}
 USER_PAUSED = set()
 
@@ -334,19 +335,22 @@ def run_manual_scan(chat_id):
         send_telegram(chat_id, "⚠️ No location set! Click <b>'📍 Share location'</b> first.")
         return
         
-    u_lat, u_lon = USER_LOCATIONS[chat_id][0], USER_LOCATIONS[chat_id][1]
-    send_telegram(chat_id, f"🔎 Scanning 50 km halo around ({u_lat:.2f}, {u_lon:.2f})...")
+    user_info = USER_LOCATIONS[chat_id]
+    u_lat, u_lon = user_info["lat"], user_info["lon"]
+    min_alt = user_info.get("min_altitude", 0)
+    
+    send_telegram(chat_id, f"🔎 Scanning 50 km halo around ({u_lat:.2f}, {u_lon:.2f}) [Min Alt: {min_alt} ft]...")
     bd_planes = get_bd_planes()
     
     found_planes = []
     for p in bd_planes:
         dist = haversine(u_lat, u_lon, p["lat"], p["lon"])
-        if dist <= RADIUS_KM:
+        if dist <= RADIUS_KM and p["alt"] >= min_alt:
             p["dist"] = round(dist, 1)
             found_planes.append(p)
             
     if not found_planes:
-        send_telegram(chat_id, "Scan finished. No airborne aircraft inside 50 km right now.")
+        send_telegram(chat_id, "Scan finished. No airborne aircraft matching criteria inside 50 km right now.")
     else:
         msg = f"✈️ <b>Current Flights in 50 km Halo ({len(found_planes)}):</b>\n\n"
         for p in found_planes:
@@ -372,14 +376,16 @@ def handle_telegram_updates():
                     if "location" in msg:
                         lat = msg["location"]["latitude"]
                         lon = msg["location"]["longitude"]
-                        USER_LOCATIONS[chat_id] = {"lat": lat, "lon": lon, "min_altitude": 0}
+                        # আগের অল্টিটিউড সেটিংস বজায় রেখে লোকেশন আপডেট করা
+                        current_min_alt = USER_LOCATIONS.get(chat_id, {}).get("min_altitude", 0)
+                        USER_LOCATIONS[chat_id] = {"lat": lat, "lon": lon, "min_altitude": current_min_alt}
                         USER_ALERTED_PLANES[chat_id] = set()
-                        send_telegram(chat_id, f"📍 <b>Location set successfully!</b>\nLat: {lat:.4f}, Lon: {lon:.4f}\n\nScanning 90 km halo around you now...")
+                        send_telegram(chat_id, f"📍 <b>Location set successfully!</b>\nLat: {lat:.4f}, Lon: {lon:.4f}\n\nScanning 50 km halo around you now...")
                         run_manual_scan(chat_id)
                     
                     text = msg.get("text", "")
                     if text == "/start":
-                        send_telegram(chat_id, "Welcome to AeroHalo! Click '📍 Share location' below to activate live tracking.")
+                        send_telegram(chat_id, "Welcome to AeroHalo! Click '📍 Share location' below to activate live tracking.\n\nUse /setalt [altitude in ft] to filter low altitude planes (e.g., /setalt 20000)")
                     elif text == "/now":
                         run_manual_scan(chat_id)
                     elif text == "/pause":
@@ -390,25 +396,20 @@ def handle_telegram_updates():
                         send_telegram(chat_id, "▶️ Proximity tracking resumed.")
                     elif text == "/status":
                         status = "⏸️ Paused" if chat_id in USER_PAUSED else "🟢 Active"
-                        loc_str = f"{USER_LOCATIONS[chat_id][0]:.4f}, {USER_LOCATIONS[chat_id][1]:.4f}" if chat_id in USER_LOCATIONS else "Not Set"
-                        send_telegram(chat_id, f"<b>Bot Status:</b> {status}\n<b>Location:</b> {loc_str}\n<b>Radius:</b> 50 km")
+                        user_info = USER_LOCATIONS.get(chat_id, {"lat": 0, "lon": 0, "min_altitude": 0})
+                        loc_str = f"{user_info['lat']:.4f}, {user_info['lon']:.4f}" if chat_id in USER_LOCATIONS else "Not Set"
+                        send_telegram(chat_id, f"<b>Bot Status:</b> {status}\n<b>Location:</b> {loc_str}\n<b>Min Altitude Filter:</b> {user_info.get('min_altitude', 0)} ft\n<b>Radius:</b> 50 km")
                     elif text.startswith("/setalt"):
-    try:
-        parts = text.split()
-        alt_value = int(parts[1])
-        if chat_id not in USER_LOCATIONS:
-            USER_LOCATIONS[chat_id] = {"lat": 0, "lon": 0, "min_altitude": alt_value}
-        else:
-            # যদি আগে থেকেই ডিকশনারি থাকে
-            if isinstance(USER_LOCATIONS[chat_id], dict):
-                USER_LOCATIONS[chat_id]["min_altitude"] = alt_value
-            else:
-                # যদি আগের কোড লিস্ট আকারে থাকে
-                lat_lon = USER_LOCATIONS[chat_id]
-                USER_LOCATIONS[chat_id] = {"lat": lat_lon[0], "lon": lat_lon[1], "min_altitude": alt_value}
-        send_telegram(chat_id, f"✅ Minimum altitude filter set to {alt_value} ft.")
-    except (IndexError, ValueError):
-        send_telegram(chat_id, "⚠️ Please provide a valid altitude. Example: /setalt 20000")
+                        try:
+                            parts = text.split()
+                            alt_value = int(parts[1])
+                            if chat_id not in USER_LOCATIONS:
+                                USER_LOCATIONS[chat_id] = {"lat": 25.0706365, "lon": 91.4102260, "min_altitude": alt_value}
+                            else:
+                                USER_LOCATIONS[chat_id]["min_altitude"] = alt_value
+                            send_telegram(chat_id, f"✅ Minimum altitude filter set to <b>{alt_value} ft</b>.")
+                        except (IndexError, ValueError):
+                            send_telegram(chat_id, "⚠️ Please provide a valid altitude in feet. Example: /setalt 20000")
         except Exception:
             pass
         time.sleep(3)
@@ -423,31 +424,22 @@ while True:
         bd_planes = get_bd_planes()
         print(f"BD Scan Log: {len(bd_planes)} airborne aircraft tracked in BD bounds", flush=True)
 
-        for chat_id, coords in list(USER_LOCATIONS.items()):
+        for chat_id, user_info in list(USER_LOCATIONS.items()):
             if chat_id in USER_PAUSED:
                 continue
 
-                # ১. ইউজার ডাটা থেকে ল্যাট, লন এবং মিনিমাম অল্টিটিউড বের করা
-    if isinstance(coords, dict):
-        u_lat = coords["lat"]
-        u_lon = coords["lon"]
-        user_min_alt = coords.get("min_altitude", 0)
-    else:
-        u_lat = coords[0]
-        u_lon = coords[1]
-        user_min_alt = 0
+            u_lat = user_info["lat"]
+            u_lon = user_info["lon"]
+            user_min_alt = user_info.get("min_altitude", 0)
 
-    alerted = USER_ALERTED_PLANES.setdefault(chat_id, set())
-    currently_in_range = set()
+            alerted = USER_ALERTED_PLANES.setdefault(chat_id, set())
+            currently_in_range = set()
 
-    for p in bd_planes:
-        dist = haversine(u_lat, u_lon, p["lat"], p["lon"])
-        
-        # ২. এখানে মিনিমাম অল্টিটিউড চেক করার শর্তটি জুড়ে দিন (p['alt'] >= user_min_alt)
-        if dist <= RADIUS_KM and p["alt"] >= 550 and p["alt"] >= user_min_alt:
-            currently_in_range.add(p["icao"])
-            if p["icao"] not in alerted:
-                # নোটিফিকেশন পাঠানোর কোড...
+            for p in bd_planes:
+                dist = haversine(u_lat, u_lon, p["lat"], p["lon"])
+                # এখানে ইউজারের সেট করা মিনিমাম অল্টিটিউড চেক করা হচ্ছে
+                if dist <= RADIUS_KM and p["alt"] >= 550 and p["alt"] >= user_min_alt:
+                    currently_in_range.add(p["icao"])
                     if p["icao"] not in alerted:
                         msg = (
                             f"✈️🟢 <b>New Flight Detected!</b>\n\n"
