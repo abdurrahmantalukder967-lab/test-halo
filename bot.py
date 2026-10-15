@@ -64,8 +64,8 @@ def get_country_from_prefix(reg):
     if not reg or not isinstance(reg, str) or reg == "N/A":
         return "Unknown Country"
     
-reg = reg.upper().strip()
-prefix_map = {
+    reg = reg.upper().strip()
+    prefix_map = {
     "S2": "Bangladesh 🇧🇩",
     "S3": "Bangladesh (Military) 🇧🇩", 
     "VT": "India 🇮🇳",
